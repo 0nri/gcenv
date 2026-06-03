@@ -464,10 +464,14 @@ _gcenv_list() {
       local env_name=$(basename "$f" .json)
       local marker=""
       [ "${GCENV_ACTIVE:-}" = "$env_name" ] && marker=" ← active in this shell"
-      echo "  ✓ ${env_name}.json${marker}"
+      echo "  ${env_name}.json${marker}"
     done
   fi
-  [ "$found" -eq 0 ] && echo "  (none — run 'gcenv init <name> <project>' to create an environment)"
+  if [ "$found" -eq 0 ]; then
+    echo "  (none — run 'gcenv init <name> <project>' to create an environment)"
+  elif [ -z "${GCENV_ACTIVE:-}" ]; then
+    echo "  (no ADC active — run 'gcenv use <name>' to activate an environment)"
+  fi
 }
 
 # _gcenv_status — show details of the currently active environment.
