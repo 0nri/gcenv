@@ -45,6 +45,17 @@ _gcenv_install_file() {
   install -m 600 "$1" "$2"
 }
 
+# _gcenv_restore_global_active_config — restore the on-disk gcloud active config.
+# `gcloud config configurations create` silently changes the on-disk active_config
+# marker, which breaks shells that do not use CLOUDSDK_ACTIVE_CONFIG_NAME.
+# This helper runs activate in a subshell with the env var unset so that only
+# the on-disk marker is updated — the current shell's env var is unchanged.
+_gcenv_restore_global_active_config() {
+  local prev="${1:-}"
+  [ -z "$prev" ] && return 0
+  (unset CLOUDSDK_ACTIVE_CONFIG_NAME; gcloud config configurations activate "$prev") >/dev/null 2>&1 || true
+}
+
 # _gcenv_set_terminal_title — set window title and iTerm2 tab badge.
 # Only sends escape codes when stdout is a terminal (guards against piped use).
 _gcenv_set_terminal_title() {
@@ -111,6 +122,20 @@ _gcenv_init() {
     esac
   done
 
+  # Warn early when no project is specified — ADC will lack a quota project,
+  # which causes gcloud to emit a warning and may cause API quota errors.
+  if $do_login && [ -z "$project" ]; then
+    echo "⚠️  No project specified. ADC will be created without a quota project."
+    echo "    Tip: gcenv init $name <PROJECT_ID>   to include one."
+    echo ""
+  fi
+
+  # Save the on-disk active config so non-gcenv shells are unaffected.
+  # gcloud config configurations create silently changes the on-disk active
+  # marker; we restore it immediately after so other terminals/IDEs stay put.
+  local prev_global
+  prev_global=$( (unset CLOUDSDK_ACTIVE_CONFIG_NAME; gcloud config configurations list --filter='is_active=true' --format='value(name)' 2>/dev/null) | head -1 )
+
   # 1. Create the gcloud configuration if it doesn't exist
   if ! gcloud config configurations describe "$name" >/dev/null 2>&1; then
     gcloud config configurations create "$name"
@@ -119,7 +144,11 @@ _gcenv_init() {
     echo "Configuration '$name' already exists."
   fi
 
-  # 2. Activate in this shell
+  # Restore the global on-disk active config immediately so non-gcenv shells
+  # are not affected by the create command's side effect.
+  _gcenv_restore_global_active_config "$prev_global"
+
+  # 2. Activate in this shell only (via env var, not the on-disk marker)
   export CLOUDSDK_ACTIVE_CONFIG_NAME="$name"
   export GCENV_ACTIVE="$name"
 
@@ -174,10 +203,18 @@ _gcenv_import() {
   region=$(_gcenv_config_value compute/region)
   zone=$(_gcenv_config_value compute/zone)
 
+  # Save the on-disk active config so non-gcenv shells are unaffected.
+  local prev_global
+  prev_global=$( (unset CLOUDSDK_ACTIVE_CONFIG_NAME; gcloud config configurations list --filter='is_active=true' --format='value(name)' 2>/dev/null) | head -1 )
+
   # Create new named configuration
   gcloud config configurations create "$name"
 
-  # Activate to configure it
+  # Restore the global on-disk active config immediately so non-gcenv shells
+  # are not affected by the create command's side effect.
+  _gcenv_restore_global_active_config "$prev_global"
+
+  # Activate to configure it (env var only — does not touch on-disk marker)
   export CLOUDSDK_ACTIVE_CONFIG_NAME="$name"
 
   # Copy non-empty properties into the new config
@@ -257,9 +294,13 @@ _gcenv_login() {
   local env_name="$GCENV_ACTIVE"
   local adc_dir="$HOME/.config/gcenv/adc"
   local adc_path="$adc_dir/${env_name}.json"
+  local global_adc="$HOME/.config/gcloud/application_default_credentials.json"
+  local adc_backup="${global_adc}.gcenv_backup"
   mkdir -p "$adc_dir"
 
-  # Step 1: gcloud CLI authentication
+  # Step 1: gcloud CLI authentication (browser open #1).
+  echo "ℹ️  This will open your browser twice: once for gcloud CLI, once for ADC."
+  echo ""
   echo "🔑 Authenticating gcloud CLI for '$env_name'..."
   gcloud auth login || return 1
 
@@ -275,26 +316,56 @@ _gcenv_login() {
 
   # Step 3: Generate ADC with quota project from this environment's config.
   # Uses _gcenv_config_value to avoid assigning the literal string "(unset)".
-  echo "🔑 Generating Application Default Credentials..."
+  echo ""
+  echo "🔑 Generating Application Default Credentials... (browser open #2)"
   local project
   project=$(_gcenv_config_value project)
 
+  # Backup the global ADC so we can restore it after — this keeps IDEs and
+  # non-gcenv shells pointing at whatever credentials they had before.
+  # gcloud auth application-default login always overwrites the global file.
+  local had_global_adc=false
+  if [ -f "$global_adc" ]; then
+    had_global_adc=true
+    cp "$global_adc" "$adc_backup"
+  fi
+
+  # Temporarily unset GOOGLE_APPLICATION_CREDENTIALS before calling ADC login.
+  # If it is set, gcloud detects it and emits a confusing warning plus an
+  # interactive "Do you want to continue (Y/n)?" prompt — even though gcenv
+  # is about to copy the result to a different path anyway.
+  local prev_gac="${GOOGLE_APPLICATION_CREDENTIALS:-}"
+  unset GOOGLE_APPLICATION_CREDENTIALS
+
+  local adc_login_ok=true
   if [ -n "$project" ]; then
-    gcloud auth application-default login --project "$project" || return 1
+    gcloud auth application-default login --project "$project" || adc_login_ok=false
   else
-    gcloud auth application-default login || return 1
+    gcloud auth application-default login || adc_login_ok=false
     echo "⚠️  No project set. Run 'gcloud config set project <PROJECT_ID>' and re-run 'gcenv login' to set quota project."
   fi
 
-  # Step 4: Copy ADC to isolated path using install -m 600 (atomic, no race window).
-  # cp NOT mv — global ADC must remain intact for IDEs, other tools, and shell
-  # sessions not using gcenv.
-  local global_adc="$HOME/.config/gcloud/application_default_credentials.json"
-  if [ -f "$global_adc" ]; then
+  # Step 4: Copy ADC to isolated path, then restore the global ADC to its
+  # pre-login state so IDEs and non-gcenv shells are completely unaffected.
+  if $adc_login_ok && [ -f "$global_adc" ]; then
     _gcenv_install_file "$global_adc" "$adc_path"
+    # Restore global ADC: put back the original, or remove if there was none.
+    if $had_global_adc; then
+      mv "$adc_backup" "$global_adc"
+    else
+      rm -f "$global_adc"
+    fi
     export GOOGLE_APPLICATION_CREDENTIALS="$adc_path"
     echo "✅ ADC isolated: $adc_path"
   else
+    # Restore even on failure so we don't leave the global ADC in a broken state.
+    if $had_global_adc; then
+      mv "$adc_backup" "$global_adc" 2>/dev/null || true
+    fi
+    # Restore GOOGLE_APPLICATION_CREDENTIALS to its pre-login value.
+    if [ -n "$prev_gac" ]; then
+      export GOOGLE_APPLICATION_CREDENTIALS="$prev_gac"
+    fi
     echo "Error: ADC file not generated. Login may have been cancelled." >&2
     return 1
   fi
@@ -396,13 +467,35 @@ _gcenv_delete() {
   [ "${GCENV_ACTIVE:-}" = "$name" ] && was_active=true
 
   # Unset CLOUDSDK_ACTIVE_CONFIG_NAME BEFORE calling gcloud delete.
-  # gcloud refuses to delete the configuration it considers currently active
-  # (as determined by CLOUDSDK_ACTIVE_CONFIG_NAME or the on-disk active marker).
   if $was_active; then
     unset CLOUDSDK_ACTIVE_CONFIG_NAME
   fi
 
-  gcloud config configurations delete "$name" --quiet 2>/dev/null || \
+  # gcloud refuses to delete the configuration it considers "active", checking
+  # BOTH the env var (unset above) AND the on-disk active_config marker.
+  # If the on-disk marker still points to the config being deleted, switch it
+  # away first — otherwise gcloud refuses to delete and the failure is silent.
+  local ondisk_active
+  ondisk_active=$( (unset CLOUDSDK_ACTIVE_CONFIG_NAME; gcloud config configurations list --filter='is_active=true' --format='value(name)' 2>/dev/null) | head -1 )
+  if [ "$ondisk_active" = "$name" ]; then
+    local fallback
+    fallback=$( (unset CLOUDSDK_ACTIVE_CONFIG_NAME; gcloud config configurations list --format='value(name)' 2>/dev/null) | grep -v "^${name}$" | head -1 )
+    if [ -n "$fallback" ]; then
+      # Switch the on-disk active marker to another existing config.
+      (unset CLOUDSDK_ACTIVE_CONFIG_NAME; gcloud config configurations activate "$fallback") >/dev/null 2>&1 || true
+    else
+      # No other config exists (user started fresh with only gcenv configs).
+      # Create 'default' so gcloud has a safe landing spot.
+      # gcloud config configurations create activates the new config on disk
+      # automatically, so no separate activate call is needed.
+      (unset CLOUDSDK_ACTIVE_CONFIG_NAME; gcloud config configurations create default) >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # --quiet suppresses the interactive confirmation prompt.
+  # 2>/dev/null intentionally removed — real errors (e.g. "cannot delete the
+  # active configuration") must be visible rather than silently swallowed.
+  gcloud config configurations delete "$name" --quiet || \
     echo "⚠️  gcloud configuration '$name' not found or already deleted."
   rm -f "$HOME/.config/gcenv/adc/${name}.json"
 
