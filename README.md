@@ -51,7 +51,7 @@ source ~/.gcenv/gcenv.sh
 
 ```sh
 # Create a named environment, authenticate, and capture ADC in one step
-gcenv init dev my-dev-project
+gcenv init dev my-dev-project   # project ID is required
 
 # Activate it in the current shell
 gcenv use dev
@@ -95,7 +95,8 @@ gcenv deactivate
 
 | Command | Args | Description |
 |---------|------|-------------|
-| `gcenv init` | `<name> [project] [--no-login]` | Create a gcloud config, authenticate (browser), and capture ADC. `--no-login` skips auth for service account key environments. |
+| `gcenv init` | `<name> <project>` | Create a gcloud config, authenticate (browser), and capture ADC with quota project. Project ID is required. |
+| `gcenv init` | `<name> --no-login` | Create a gcloud config only, skip authentication. Use `gcenv set-adc` afterward for service account key environments. |
 | `gcenv import` | `<name>` | Snapshot the current shell's gcloud config (project, account, region, zone) and ADC into a new named environment. Zero browser interaction. |
 | `gcenv use` | `<name>` | Activate a named environment in the current shell by setting `CLOUDSDK_ACTIVE_CONFIG_NAME` and `GOOGLE_APPLICATION_CREDENTIALS`. |
 | `gcenv deactivate` | | Unset all `gcenv`-managed variables, returning the shell to the system default `gcloud` configuration. |

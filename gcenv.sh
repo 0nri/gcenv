@@ -137,7 +137,8 @@ _gcenv_init() {
   local do_login=true
 
   if [ -z "$name" ]; then
-    echo "Usage: gcenv init <name> [project] [--no-login]" >&2
+    echo "Usage: gcenv init <name> <project>   (authenticate + capture ADC)" >&2
+    echo "       gcenv init <name> --no-login   (create config only, skip auth)" >&2
     return 1
   fi
   _gcenv_validate_name "$name" || return 1
@@ -151,12 +152,14 @@ _gcenv_init() {
     esac
   done
 
-  # Warn early when no project is specified — ADC will lack a quota project,
-  # which causes gcloud to emit a warning and may cause API quota errors.
+  # Require a project when logging in — without one, gcloud auth application-default
+  # login cannot set a quota project, and ADC-based API calls will fail with quota errors.
+  # Use --no-login to skip authentication entirely (e.g. for service account key environments).
   if $do_login && [ -z "$project" ]; then
-    echo "⚠️  No project specified. ADC will be created without a quota project."
-    echo "    Tip: gcenv init $name <PROJECT_ID>   to include one."
-    echo ""
+    echo "Error: project ID required when authenticating." >&2
+    echo "Usage: gcenv init $name <PROJECT_ID>" >&2
+    echo "       gcenv init $name --no-login   (skip auth; configure later with 'gcenv set-adc')" >&2
+    return 1
   fi
 
   # Save the on-disk active config so non-gcenv shells are unaffected.
@@ -566,7 +569,8 @@ gcenv() {
       echo "Usage: gcenv <command> [args]"
       echo ""
       echo "Commands:"
-      echo "  init <name> [project] [--no-login]   Create config + authenticate + capture ADC"
+      echo "  init <name> <project>                 Create config + authenticate + capture ADC"
+      echo "  init <name> --no-login               Create config only, skip authentication"
       echo "  import <name>                         Snapshot current gcloud state"
       echo "  use <name>                            Activate environment in this shell"
       echo "  deactivate                            Return to system default gcloud state"
