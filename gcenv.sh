@@ -440,10 +440,17 @@ _gcenv_set_adc() {
 
 # _gcenv_list — show all environments and their ADC status.
 _gcenv_list() {
-  echo "GCP Configurations:"
+  # When a gcenv env is active, IS_ACTIVE reflects CLOUDSDK_ACTIVE_CONFIG_NAME.
+  # When no gcenv env is active, IS_ACTIVE reflects the on-disk system default —
+  # gcloud always considers exactly one configuration active.
+  if [ -n "${GCENV_ACTIVE:-}" ]; then
+    echo "GCP Configurations (gcenv active: $GCENV_ACTIVE):"
+  else
+    echo "GCP Configurations (no gcenv environment active — IS_ACTIVE shows system default):"
+  fi
   gcloud config configurations list
   echo ""
-  echo "ADC Status (gcenv):"
+  echo "ADC Files (~/.config/gcenv/adc/):"
   local adc_dir="$HOME/.config/gcenv/adc"
   local found=0
   if [ -d "$adc_dir" ]; then
@@ -452,14 +459,15 @@ _gcenv_list() {
       # zsh without nullglob: same behaviour).
       [ -f "$f" ] || continue
       found=1
-      local env_name
-      env_name=$(basename "$f" .json)
+      # Combine declaration and assignment on one line to prevent bare-assignment
+      # output in shells with certain trace/hook configurations.
+      local env_name=$(basename "$f" .json)
       local marker=""
-      [ "${GCENV_ACTIVE:-}" = "$env_name" ] && marker=" ← active"
-      echo "  ✓ $env_name${marker}"
+      [ "${GCENV_ACTIVE:-}" = "$env_name" ] && marker=" ← active in this shell"
+      echo "  ✓ ${env_name}.json${marker}"
     done
   fi
-  [ "$found" -eq 0 ] && echo "  (none — run 'gcenv init <name>' to create an environment)"
+  [ "$found" -eq 0 ] && echo "  (none — run 'gcenv init <name> <project>' to create an environment)"
 }
 
 # _gcenv_status — show details of the currently active environment.
