@@ -16,6 +16,7 @@ _gcenv() {
     'set-adc:Point environment at a service account key file'
     'list:Show environments and ADC status'
     'status:Show active environment details'
+    'make-default:Set active environment as system default'
     'delete:Remove environment and its ADC'
     'update:Pull latest gcenv from git and re-source'
     'version:Print gcenv version'

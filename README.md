@@ -104,6 +104,7 @@ gcenv deactivate
 | `gcenv set-adc` | `<name> <path>` | Copy a service account key JSON file as the ADC for the named environment. File is validated with `jq` and written with `600` permissions. |
 | `gcenv list` | | Show all `gcloud config configurations` and overlay each environment's ADC status from `~/.config/gcenv/adc/`. |
 | `gcenv status` | | Show the active environment name, environment variables, and full `gcloud config list` output. |
+| `gcenv make-default` | | Promote the active environment to the system-wide default. Sets it as the active `gcloud` configuration (via `gcloud config configurations activate`) and copies the ADC to the global location so non-gcenv shells and IDEs pick up the same credentials. |
 | `gcenv delete` | `<name>` | Prompt for confirmation, then remove the gcloud configuration and its ADC file. Automatically deactivates the current shell if the deleted env was active. |
 | `gcenv update` | | Pull the latest gcenv from git (`git pull --ff-only`) and re-source in the current shell. Requires a git-based install. |
 | `gcenv version` | | Print the gcenv version string (e.g., `gcenv 0.1.0`). Also responds to `--version`. |

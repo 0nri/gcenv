@@ -489,6 +489,43 @@ _gcenv_status() {
   gcloud config list 2>/dev/null
 }
 
+# _gcenv_make_default — promote the active gcenv environment to the system-wide default.
+# Sets the on-disk active_config marker (read by non-gcenv shells) and copies the
+# environment's ADC to the global ADC path so IDEs and other tools pick up the right creds.
+_gcenv_make_default() {
+  if [ -z "${GCENV_ACTIVE:-}" ]; then
+    echo "Error: No environment active. Run 'gcenv use <name>' first." >&2
+    return 1
+  fi
+
+  local name="$GCENV_ACTIVE"
+
+  printf "Make '%s' the system default gcloud configuration? [y/N] " "$name"
+  read -r confirm
+  case "$confirm" in
+    y|Y) ;;
+    *) echo "Aborted."; return 0 ;;
+  esac
+
+  # Activate on disk (in a subshell so the current shell's env var is unchanged).
+  # This updates the active_config marker that non-gcenv shells read.
+  (unset CLOUDSDK_ACTIVE_CONFIG_NAME; gcloud config configurations activate "$name") || return 1
+
+  # Copy the environment's ADC to the global location so non-gcenv shells and
+  # IDEs (which read ~/.config/gcloud/application_default_credentials.json) get
+  # the correct credentials.
+  local adc_path="$HOME/.config/gcenv/adc/${name}.json"
+  local global_adc="$HOME/.config/gcloud/application_default_credentials.json"
+  if [ -f "$adc_path" ]; then
+    _gcenv_install_file "$adc_path" "$global_adc"
+    echo "✅ Global ADC updated: $global_adc"
+  else
+    echo "⚠️  No ADC for '$name' — global ADC unchanged."
+  fi
+
+  echo "✅ '$name' is now the system default gcloud configuration."
+}
+
 # _gcenv_delete — remove an environment and its ADC file.
 _gcenv_delete() {
   local name="${1:-}"
@@ -571,6 +608,7 @@ gcenv() {
     set-adc)     _gcenv_set_adc "$@" ;;
     list)        _gcenv_list "$@" ;;
     status)      _gcenv_status "$@" ;;
+    make-default) _gcenv_make_default "$@" ;;
     delete)      _gcenv_delete "$@" ;;
     update)      _gcenv_update "$@" ;;
     version|--version)
@@ -590,6 +628,7 @@ gcenv() {
       echo "  set-adc <name> <path>                 Use a service account key file"
       echo "  list                                  Show environments and ADC status"
       echo "  status                                Show active environment details"
+      echo "  make-default                          Set active environment as system default"
       echo "  delete <name>                         Remove environment and its ADC"
       echo "  update                                Pull latest gcenv from git and re-source"
       echo "  version                               Print gcenv version"
