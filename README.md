@@ -104,6 +104,7 @@ gcenv deactivate
 | `gcenv list` | | Show all `gcloud config configurations` and overlay each environment's ADC status from `~/.config/gcenv/adc/`. |
 | `gcenv status` | | Show the active environment name, environment variables, and full `gcloud config list` output. |
 | `gcenv delete` | `<name>` | Prompt for confirmation, then remove the gcloud configuration and its ADC file. Automatically deactivates the current shell if the deleted env was active. |
+| `gcenv update` | | Pull the latest gcenv from git (`git pull --ff-only`) and re-source in the current shell. Requires a git-based install. |
 | `gcenv version` | | Print the gcenv version string (e.g., `gcenv 0.1.0`). Also responds to `--version`. |
 | `gcenv help` | | Show usage summary and active environment. Also responds to `--help` and `-h`. |
 

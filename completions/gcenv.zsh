@@ -17,6 +17,7 @@ _gcenv() {
     'list:Show environments and ADC status'
     'status:Show active environment details'
     'delete:Remove environment and its ADC'
+    'update:Pull latest gcenv from git and re-source'
     'version:Print gcenv version'
     'help:Show usage'
   )

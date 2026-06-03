@@ -8,6 +8,11 @@
 # gcenv version — bumped on every release using semver (MAJOR.MINOR.PATCH)
 GCENV_VERSION="0.1.0"
 
+# Installation root — the directory where gcenv.sh lives.
+# Defaults to ~/.gcenv (the installer default). Override if you installed
+# gcenv to a different path: export GCENV_ROOT=/path/to/gcenv
+GCENV_ROOT="${GCENV_ROOT:-$HOME/.gcenv}"
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -54,6 +59,30 @@ _gcenv_restore_global_active_config() {
   local prev="${1:-}"
   [ -z "$prev" ] && return 0
   (unset CLOUDSDK_ACTIVE_CONFIG_NAME; gcloud config configurations activate "$prev") >/dev/null 2>&1 || true
+}
+
+# _gcenv_update — pull the latest gcenv code from git and re-source.
+_gcenv_update() {
+  local root="${GCENV_ROOT:-$HOME/.gcenv}"
+
+  if [ ! -d "$root/.git" ]; then
+    echo "Error: gcenv was not installed via git (no .git found in $root)." >&2
+    echo "Re-install using:" >&2
+    echo "  curl -fsSL https://raw.githubusercontent.com/0nri/gcenv/main/install.sh | sh" >&2
+    return 1
+  fi
+
+  echo "Updating gcenv from $(gcenv version)..."
+  git -C "$root" pull --ff-only || {
+    echo "Error: update failed. Try manually: cd $root && git pull" >&2
+    return 1
+  }
+
+  # Re-source to pick up the new version in the current shell session.
+  # Shell functions are simply redefined; active environment variables
+  # (GCENV_ACTIVE, CLOUDSDK_ACTIVE_CONFIG_NAME, etc.) are preserved.
+  . "$root/gcenv.sh"
+  echo "✅ gcenv updated to $(gcenv version)"
 }
 
 # _gcenv_set_terminal_title — set window title and iTerm2 tab badge.
@@ -528,6 +557,7 @@ gcenv() {
     list)        _gcenv_list "$@" ;;
     status)      _gcenv_status "$@" ;;
     delete)      _gcenv_delete "$@" ;;
+    update)      _gcenv_update "$@" ;;
     version|--version)
       echo "gcenv $GCENV_VERSION"
       return 0
@@ -545,6 +575,7 @@ gcenv() {
       echo "  list                                  Show environments and ADC status"
       echo "  status                                Show active environment details"
       echo "  delete <name>                         Remove environment and its ADC"
+      echo "  update                                Pull latest gcenv from git and re-source"
       echo "  version                               Print gcenv version"
       echo ""
       [ -n "${GCENV_ACTIVE:-}" ] && echo "Active: $GCENV_ACTIVE" || echo "No environment active."
